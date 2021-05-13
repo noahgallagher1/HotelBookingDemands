@@ -1,0 +1,292 @@
+---
+title: "STAT_495_Project"
+author: "Noah Gallagher"
+date: "4/15/2021"
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Read in Data
+
+```{r}
+library(tidyverse)
+
+#Reading in data
+hotel.data <- read_csv('hotel_bookings.csv')
+```
+
+## Exploratory Data Analysis
+
+First we will look at the raw data values.
+```{r}
+glimpse(hotel.data)
+
+head(hotel.data)
+```
+
+Next we can compute the summary statistics
+```{r}
+library(skimr)
+skim(hotel.data)
+```
+
+Now we can start Data Visualization.
+```{r}
+library(gridExtra)
+# visualizing week number
+a = ggplot(hotel.data, aes(x= arrival_date_week_number))+
+  geom_histogram(binwidth = 8)+ 
+  labs(title = "arrival week number")
+
+# arrival date year
+b = ggplot(hotel.data, aes(x= arrival_date_year))+
+  geom_histogram(binwidth=)+ 
+  labs(title = "arrival date year")
+
+# arrival day of month
+c = ggplot(hotel.data, aes(x= arrival_date_day_of_month))+
+  geom_histogram(binwidth = 8)+ 
+  labs(title = "arrival day of month")
+
+# stay in weekend nights
+d = ggplot(hotel.data, aes(x= stays_in_weekend_nights))+
+  geom_histogram(binwidth = 3)+ 
+  labs(title = "num stays in weekend nights")
+
+# stay in week nights
+e = ggplot(hotel.data, aes(x= stays_in_week_nights))+
+  geom_histogram(binwidth = 3)+ 
+  labs(title = "num stays in week nights")
+
+# customer type
+f = ggplot(hotel.data, aes(x= customer_type))+
+  geom_bar()+ 
+  labs(title = "customer types")
+
+grid.arrange(a, b, c, ncol=1, nrow=3)
+
+grid.arrange(d, e, f, ncol=1, nrow=3)
+```
+
+## Question: When is the best time of year to book a hotel room?
+```{r}
+# years 2015-2017
+# months july 2015-august 2017
+stats<- hotel.data%>%
+  summarize(
+    week_mean = mean(arrival_date_week_number),
+    day_month_mean = mean(arrival_date_day_of_month)
+  )
+stats
+
+most_freq<-hotel.data%>%
+  group_by(arrival_date_month)%>%
+  summarize(
+    count=n()
+  )%>%
+  arrange(desc(count))%>%
+  head(1)
+most_freq
+
+least_freq<-hotel.data%>%
+  group_by(arrival_date_month)%>%
+  summarize(
+    count=n()
+  )%>%
+  arrange(count)
+least_freq
+
+```
+
+Guests typically arrive on the 15th on the month.
+Guests typically arrive the 27th week of the year.
+Guests typically arrive in August.
+
+Least busy: January
+Most busy: August
+
+## Question: How far in advance do people make bookings? Are they more inclined to cancel?
+Lead time represents the number of days that elapsed between the entering date of the booking into the PMS and the arrival date.
+
+```{r}
+attach(hotel.data)
+
+# visualizing lead time FOR ALL
+ggplot(hotel.data, aes(x= lead_time))+
+  geom_histogram(bins=5)+
+  labs(title = "Booking Lead Time", x = "Lead Time (in days)", y = "Number of Bookings")
+
+# visualizing cancellation rate
+ggplot(hotel.data, aes(x= is_canceled))+
+  geom_bar(bins=5)+
+  labs(title = "Cancellations", subtitle = '0 = NO, 1 = YES')
+
+#average lead time
+cat("the average lead time is: ", mean(lead_time))
+
+# Is the higher lead time associated with higher cancellation?
+cat("\nthe correlation btw lead time and cancellation is: ",cor(lead_time, is_canceled))
+
+
+cancellation<-hotel.data%>%
+  select(lead_time, is_canceled)
+pairs(cancellation)
+
+mean(is_canceled)
+```
+Guests typically book hotels 104 days prior to their arrival.
+
+Lead time and Cancellations have a positive correlation of 0.29
+
+
+## Seperating the data into City hotels and Resport hotels
+```{r}
+seperate_hotels <- hotel.data%>%
+  group_by(hotel)%>%
+  summarise(
+    entries = n(),
+    #week_mean = mean(arrival_date_week_number),
+    #day_month_mean = mean(arrival_date_day_of_month),
+    avg_lead = mean(lead_time),
+    #corr = cor(lead_time, is_canceled),
+    avg_can = mean(is_canceled)
+  )%>%
+  mutate(
+    percent_cancell = round(avg_can*100, digits = 2)
+  )
+seperate_hotels
+```
+Cancellation Rate:
+  - City Hotels have 41.73% cancellation rate.
+  - Resort Hotels have 27.76% cancellation rate.
+
+Correlation:
+  - City Hotels - cancellation and lead time is 31% correlated (positive)
+  - Resort Hotels  - cancellation and lead time is 23% correlated (positive)
+
+
+## Bootstrapping
+
+```{r}
+library(infer)
+set.seed(99999)
+
+#Size 1,000 City
+city_sample <- hotel.data%>%
+  filter(hotel == 'City Hotel')%>%
+  rep_sample_n(size = 1000, reps = 50)
+city_sample
+
+#Size 1,000 Resort
+resort_sample <- hotel.data%>%
+  filter(hotel == 'Resort Hotel')%>%
+  rep_sample_n(size = 1000, reps = 50)
+resort_sample
+
+# getting stats from city sample
+city_sample_stats <- city_sample%>%
+  group_by(replicate)%>%
+  summarise(
+    week_mean = mean(arrival_date_week_number),
+    day_month_mean = mean(arrival_date_day_of_month),
+    avg_lead = mean(lead_time),
+    corr = cor(lead_time, is_canceled),
+    avg_can = mean(is_canceled)
+  )%>%
+  mutate(
+    percent_cancell = round(avg_can*100, digits = 2)
+  )
+city_sample_stats
+
+mean(city_sample_stats$avg_lead)
+mean(city_sample_stats$corr)
+mean(city_sample_stats$percent_cancell)
+
+# getting stats from resort sample
+resort_sample_stats <- resort_sample%>%
+  group_by(replicate)%>%
+  summarise(
+    week_mean = mean(arrival_date_week_number),
+    day_month_mean = mean(arrival_date_day_of_month),
+    avg_lead = mean(lead_time),
+    corr = cor(lead_time, is_canceled),
+    avg_can = mean(is_canceled)
+  )%>%
+  mutate(
+    percent_cancell = round(avg_can*100, digits = 2)
+  )
+resort_sample_stats
+
+mean(resort_sample_stats$avg_lead)
+mean(resort_sample_stats$corr)
+mean(resort_sample_stats$percent_cancell)
+
+# plotting avg lead time for city sample
+ggplot(city_sample_stats, aes(x= avg_lead))+
+  geom_histogram(bins=10)+
+  labs(title = "Lead time Booking for Bootstrapped City Hotels", x = "Average Lead Time")
+
+# plotting avg lead time for resort sample
+ggplot(resort_sample_stats, aes(x= avg_lead))+
+  geom_histogram(bins=10)+
+  labs(title = "Lead time Booking for Bootstrapped Resort Hotels", x = "Average Lead Time")
+```
+
+## Prediction from Samples
+
+Q: Can we predict the arrival date for 2 adults with 2 children.
+```{r}
+library(moderndive)
+
+# Prediction using City Hotel data
+city_predict <- lm(arrival_date_day_of_month ~ adults + children, data=city_sample)
+get_regression_table(city_predict)
+
+# Prediction using Resort Hotel data
+resort_predict <- lm(arrival_date_day_of_month ~ adults + children, data=resort_sample)
+get_regression_table(resort_predict)
+
+#Prediction using ALL hotels - this is on teh presentation
+hotel_arrival <- lm(arrival_date_day_of_month ~ adults + children + babies, data=hotel.data)
+get_regression_table(hotel_arrival)
+
+# Prediction using Resort Hotel data
+resort_predict_ad2_ch2_resort <- lm(is_canceled~lead_time+previous_bookings_not_canceled, data=resort_sample)
+get_regression_table(resort_predict_ad2_ch2_resort)
+
+# number of special requests
+attach(hotel.data)
+spec_req <- lm(total_of_special_requests ~ adults + children + babies)
+get_regression_table(spec_req)
+
+# number of cancellation
+hotel_cancelled<- lm(is_canceled ~ lead_time + previous_bookings_not_canceled, data=hotel.data)
+get_regression_table(hotel_cancelled)
+```
+City Hotel: Prediction date of 15.917 + 2(-0.062) + 2(0.354) = 16.5
+- Arrival will be on the 17th
+
+Resort Hotel: Prediction date of 15.756 + 2(0.018) + 2(0.387) = 16.566 = 17
+- Arrival will be on the 17th
+
+
+## Regression : lead time vs. arrival week number
+
+Using regression to form a line that tells us the relationship between how far in advance guests book their stays and their arrival week number.
+```{r}
+ggplot(hotel.data, aes(y = arrival_date_week_number, x = lead_time))+
+  geom_point(shape = 1) +
+  geom_smooth(method = lm) +
+  #geom_jitter(shape = 1)+
+  labs(y='arrival week #',x='lead time')
+
+```
+Findings: People that arrive later in the year, often book further in advance.
+
